@@ -143,6 +143,7 @@ class CGOL
 
 public:
 	bool quit = false;
+	bool render_grid = false;
 	int sleep = 100;
 
 	CGOL(int x, int y, int scale)
@@ -173,6 +174,14 @@ public:
 		                          size_y * render_scale,
 		                          SDL_WINDOW_SHOWN);
 		renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+	}
+
+	void randomize()
+	{
+		for (int i = 0; i < size_x * size_y; i++)
+		{
+			newmatrix[i] = rand() % 2;
+		}
 	}
 
 	void getInput()
@@ -207,6 +216,16 @@ public:
 					break;
 				case SDLK_z:
 					sleep += 20;
+					if (sleep>150)
+					{
+						sleep = 150;
+					}
+					break;
+				case SDLK_l:
+					randomize();
+					break;
+				case SDLK_g:
+					render_grid = !render_grid;
 					break;
 				case SDLK_c:
 					continuous = !continuous;
@@ -263,8 +282,11 @@ public:
 					SDL_SetRenderDrawColor(renderer, cellColor.r, cellColor.g, cellColor.b, cellColor.a);
 					SDL_RenderFillRect(renderer, &rect);
 				}
-				SDL_SetRenderDrawColor(renderer, gridColor.r, gridColor.b, gridColor.g, gridColor.a);
-				SDL_RenderDrawRect(renderer, &rect);
+				if (render_grid)
+				{
+					SDL_SetRenderDrawColor(renderer, gridColor.r, gridColor.b, gridColor.g, gridColor.a);
+					SDL_RenderDrawRect(renderer, &rect);
+				}
 			}
 		}
 		SDL_RenderPresent(renderer);
@@ -279,7 +301,8 @@ public:
 
 int main()
 {
-	CGOL game = CGOL(20,30,20);
+	srand(time(NULL));
+	CGOL game = CGOL(1920, 1080,1);
 	game.sdlInit();
 	while (!game.quit)
 	{
