@@ -2,35 +2,32 @@
 #include <algorithm>
 #include <SDL.h>
 #include <stdexcept>
+#include <chrono>
 #undef main
+#define PERF_ITERATIONS 10000
 
 class CGOL
 {
 	int size_x;
 	int size_y;
 	int render_scale;
-	bool* matrix = nullptr;
-	bool* newmatrix = nullptr;
+	bool* matrix_cells = nullptr;
+	bool* matrix_newcells = nullptr;
+	int* matrix_neighbors;
+	int* matrix_newneighbors;
 	SDL_Window* window = nullptr;
 	SDL_Renderer* renderer = nullptr;
-	SDL_Event event;
+	SDL_Event event{};
 	bool clicked = false;
-	int mouseX, mouseY;
+	int mouseX = NULL;
+	int mouseY = NULL;
 	bool step = false;
-	bool continuous = false;
-	SDL_Color gridColor = {255, 255, 255, 255};
-	SDL_Color cellColor = {255, 0, 0, 255};
-	SDL_Color bgColor = {0, 0, 0, 255};
+	bool continuous = true;
+	int sleep = 0;
+	SDL_Color gridColor = { 255, 255, 255, 255 };
+	SDL_Color cellColor = { 255, 0, 0, 255 };
+	SDL_Color bgColor = { 0, 0, 0, 255 };
 
-
-	void _initData(int x, int y, int scale)
-	{
-		size_x = x;
-		size_y = y;
-		render_scale = scale;
-		matrix = new bool[x * y]{};
-		newmatrix = new bool[x * y]{};
-	}
 
 	bool _get_cell(int x, int y, bool* mat)
 	{
@@ -43,81 +40,124 @@ class CGOL
 
 	bool _get_mcell(int x, int y)
 	{
-		return _get_cell(x, y, matrix);
+		return _get_cell(x, y, matrix_cells);
 	}
 
 	bool _get_newmcell(int x, int y)
 	{
-		return _get_cell(x, y, newmatrix);
+		return _get_cell(x, y, matrix_newcells);
 	}
 
 	void _set_newmcell(int x, int y, bool value)
 	{
-		newmatrix[x + size_x * y] = value;
+		matrix_newcells[x + size_x * y] = value;
 	}
 
 	void _switch_newcell(int x, int y)
 	{
-		newmatrix[x + size_x * y] = !newmatrix[x + size_x * y];
+		bool& cellstate = matrix_newcells[x + size_x * y];
+		if (cellstate)
+		{
+			_dec_neighbor(x, y);
+		}
+		else
+		{
+			_inc_neighbor(x, y);
+		}
+		cellstate = !cellstate;
 	}
 
-	int _count_neighbors(int x, int y)
+	void _change_neighbor(int x, int y, bool increase)
 	{
-		int neighbors = 0;
-		for (int i = y - 1; i <= y + 1; i++)
+		for (int k = y - 1; k <= y + 1; k++)
 		{
-			for (int j = x - 1; j <= x + 1; j++)
+			for (int l = x - 1; l <= x + 1; l++)
 			{
-				if (i == y && j == x)
+				if (k < 0 || k >= size_y || l < 0 || l >= size_x || (y == k && x == l))
 				{
 					continue;
 				}
-				if (_get_mcell(j, i))
+				if (increase)
 				{
-					neighbors += 1;
+					matrix_newneighbors[l + size_x * k]++;
+				}
+				else
+				{
+					matrix_newneighbors[l + size_x * k]--;
 				}
 			}
 		}
-		return neighbors;
 	}
 
-	void _swap_matrices()
+	void _inc_neighbor(int x, int y)
 	{
-		bool* tmp_matrix = matrix;
-		matrix = newmatrix;
-		newmatrix = tmp_matrix;
+		_change_neighbor(x, y, true);
+	}
+
+	void _dec_neighbor(int x, int y)
+	{
+		_change_neighbor(x, y, false);
+	}
+
+	void _count_neighbors()
+	{
+		std::fill_n(matrix_neighbors, size_x * size_y, 0);
+		for (int i = 0; i < size_y; i++)
+		{
+			for (int j = 0; j < size_x; j++)
+			{
+				if (_get_newmcell(j, i))
+				{
+					_inc_neighbor(j, i);
+				}
+			}
+		}
+	}
+
+	void _swap_cellmatrices()
+	{
+		bool* tmp_matrix = matrix_cells;
+		matrix_cells = matrix_newcells;
+		matrix_newcells = tmp_matrix;
+	}
+
+	void _swap_neighbormatrices()
+	{
+		int* tmp_matrix = matrix_neighbors;
+		matrix_neighbors = matrix_newneighbors;
+		matrix_newneighbors = tmp_matrix;
 	}
 
 	void _advance_cell(int x, int y)
 	{
-		int neighbor = _count_neighbors(x, y);
+		int neighbor = matrix_neighbors[x + size_x * y];
+		bool alive = false;
 		if (_get_mcell(x, y))
 		{
 			if (neighbor == 2 || neighbor == 3)
 			{
-				_set_newmcell(x, y, true);
-			}
-			else
-			{
-				_set_newmcell(x, y, false);
+				alive = true;
 			}
 		}
 		else
 		{
 			if (neighbor == 3)
 			{
-				_set_newmcell(x, y, true);
+				alive = true;
 			}
-			else
-			{
-				_set_newmcell(x, y, false);
-			}
+		}
+		_set_newmcell(x, y, alive);
+		if (alive)
+		{
+			_inc_neighbor(x, y);
 		}
 	}
 
 	void _advance()
 	{
-		_swap_matrices();
+		_swap_neighbormatrices();
+		std::fill_n(matrix_newneighbors, size_x * size_y, 0);
+		_swap_cellmatrices();
 		for (int i = 0; i < size_y; i++)
 		{
 			for (int j = 0; j < size_x; j++)
@@ -144,24 +184,29 @@ class CGOL
 public:
 	bool quit = false;
 	bool render_grid = false;
-	int sleep = 100;
 
 	CGOL(int x, int y, int scale)
 	{
-		_initData(x, y, scale);
+		size_x = x;
+		size_y = y;
+		render_scale = scale;
+		matrix_cells = new bool[x * y]{};
+		matrix_newcells = new bool[x * y]{};
+		matrix_neighbors = new int[x * y]{};
+		matrix_newneighbors = new int[x * y]{};
 	}
 
-	CGOL(bool* inpmatrix, int x, int y, int scale)
+	CGOL(bool* inpmatrix, int x, int y, int scale) : CGOL(x, y, scale)
 	{
-		_initData(x, y, scale);
-		if (newmatrix)
+		if (matrix_newcells)
 		{
-			memcpy(newmatrix, inpmatrix, x * y * sizeof(bool));
+			memcpy(matrix_newcells, inpmatrix, x * y * sizeof(bool));
 		}
 		else
 		{
-			throw std::runtime_error("*newmatrix = '0'");
+			throw std::runtime_error("*matrix_newcells = '0'");
 		}
+		_count_neighbors();
 	}
 
 	void sdlInit()
@@ -171,8 +216,8 @@ public:
 			printf("Error initializing SDL: %s\n", SDL_GetError());
 		}
 		window = SDL_CreateWindow("CGOL", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, size_x * render_scale,
-		                          size_y * render_scale,
-		                          SDL_WINDOW_SHOWN);
+			size_y * render_scale,
+			SDL_WINDOW_SHOWN);
 		renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 	}
 
@@ -180,8 +225,9 @@ public:
 	{
 		for (int i = 0; i < size_x * size_y; i++)
 		{
-			newmatrix[i] = rand() % 2;
+			matrix_newcells[i] = (rand() > (RAND_MAX / 2));
 		}
+		_count_neighbors();
 	}
 
 	void getInput()
@@ -204,8 +250,12 @@ public:
 				{
 				default:
 					break;
+				case SDLK_ESCAPE:
+					quit = true;
+					break;
 				case SDLK_SPACE:
 					step = !step;
+					continuous = false;
 					break;
 				case SDLK_x:
 					sleep -= 20;
@@ -216,7 +266,7 @@ public:
 					break;
 				case SDLK_z:
 					sleep += 20;
-					if (sleep>150)
+					if (sleep > 150)
 					{
 						sleep = 150;
 					}
@@ -276,7 +326,7 @@ public:
 		{
 			for (int j = 0; j < size_x; j++)
 			{
-				SDL_Rect rect = {j * render_scale, i * render_scale, render_scale, render_scale};
+				SDL_Rect rect = { j * render_scale, i * render_scale, render_scale, render_scale };
 				if (_get_newmcell(j, i))
 				{
 					SDL_SetRenderDrawColor(renderer, cellColor.r, cellColor.g, cellColor.b, cellColor.a);
@@ -294,20 +344,51 @@ public:
 
 	~CGOL()
 	{
-		free(matrix);
-		free(newmatrix);
+		delete[] matrix_cells;
+		delete[] matrix_newcells;
+		delete[] matrix_neighbors;
+		delete[] matrix_newneighbors;
+		if (renderer)
+		{
+			SDL_DestroyRenderer(renderer);
+		}
+		if (window)
+		{
+			SDL_DestroyWindow(window);
+		}
 	}
 };
 
 int main()
 {
 	srand(time(NULL));
-	CGOL game = CGOL(1920, 1080,1);
+	CGOL game = CGOL(1920, 1080, 1);
+	long long iterationTime[PERF_ITERATIONS];
+	game.randomize();
 	game.sdlInit();
+	int iteration = 0;
+	std::cout << "X" << std::endl;
 	while (!game.quit)
 	{
+		auto start = std::chrono::high_resolution_clock::now();
 		game.getInput();
 		game.update();
 		game.render();
+		auto stop = std::chrono::high_resolution_clock::now();
+		long long step_duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start).count();
+		std::cout << step_duration / 1000000000.0 << "                    \r";
+		iterationTime[iteration] = step_duration;
+		iteration++;
+		if (iteration > PERF_ITERATIONS)
+		{
+			break;
+		}
 	}
+	long double average = 0;
+	for (int i = 0; i <= PERF_ITERATIONS; i++)
+	{
+		average += iterationTime[i];
+	}
+	average = average / (PERF_ITERATIONS * 1000000000);
+	std::cout << average;
 }
